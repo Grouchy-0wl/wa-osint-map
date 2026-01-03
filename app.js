@@ -10,14 +10,41 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   navigationHelpButton: false,
   animation: false,
   timeline: false,
+  // Small perf wins:
+  requestRenderMode: true, // render only when needed (big heat/CPU win)
+  maximumRenderTimeChange: Infinity,
 });
 
 viewer.scene.globe.depthTestAgainstTerrain = false;
+
+// --- Performance / heat optimizations ---
+viewer.scene.requestRenderMode = true;
+viewer.scene.maximumRenderTimeChange = Infinity;
+
+// Lower GPU load on HiDPI screens (try 0.7 if still hot)
+viewer.resolutionScale = 0.75;
+
+// Turn off a few expensive effects that aren't needed for an OSINT point map
+viewer.scene.fxaa = false;
+viewer.scene.fog.enabled = false;
+viewer.scene.globe.enableLighting = false;
+viewer.scene.globe.showGroundAtmosphere = false;
+viewer.scene.skyAtmosphere.show = false;
+
+// If you want even less GPU usage, uncomment to force 2D:
+// viewer.scene.mode = Cesium.SceneMode.SCENE2D;
 
 // Center roughly on West Africa
 viewer.camera.flyTo({
   destination: Cesium.Cartesian3.fromDegrees(0, 12, 2500000),
 });
+
+// Cache DOM lookups (small but clean)
+const fromRangeEl = document.getElementById("fromRange");
+const toRangeEl = document.getElementById("toRange");
+const fromLabelEl = document.getElementById("fromLabel");
+const toLabelEl = document.getElementById("toLabel");
+const typesEl = document.getElementById("types");
 
 let dataSource;
 let allEntities = [];
@@ -31,31 +58,38 @@ function fmtDate(ms) {
 }
 
 function applyFilters() {
-  const fromMs = availableDates[Number(document.getElementById("fromRange").value)];
-  const toMs   = availableDates[Number(document.getElementById("toRange").value)];
+  if (!availableDates.length || !allEntities.length) return;
 
-  document.getElementById("fromLabel").textContent = fmtDate(fromMs);
-  document.getElementById("toLabel").textContent   = fmtDate(toMs);
+  const fromMs = availableDates[Number(fromRangeEl.value)];
+  const toMs = availableDates[Number(toRangeEl.value)];
 
+  fromLabelEl.textContent = fmtDate(fromMs);
+  toLabelEl.textContent = fmtDate(toMs);
+
+  // Filter entities
   for (const e of allEntities) {
     const t = e.properties?.event_date_ms?.getValue();
     const ty = e.properties?.event_type?.getValue();
+
     const passDate = (typeof t === "number" && t >= fromMs && t <= toMs);
     const passType = (selectedTypes.size === 0) ? true : selectedTypes.has(ty);
+
     e.show = passDate && passType;
   }
+
+  // In requestRenderMode, we must ask Cesium to redraw after changes
+  viewer.scene.requestRender();
 }
 
 function buildTypeUI(types) {
-  const container = document.getElementById("types");
-  container.innerHTML = "";
+  typesEl.innerHTML = "";
   typeCheckboxes.clear();
 
   for (const ty of types) {
     const id = "ty_" + ty.replace(/[^a-z0-9]+/gi, "_");
     const label = document.createElement("label");
     label.innerHTML = `<input type="checkbox" id="${id}"><span>${ty}</span>`;
-    container.appendChild(label);
+    typesEl.appendChild(label);
 
     const cb = label.querySelector("input");
     cb.addEventListener("change", () => {
@@ -63,16 +97,28 @@ function buildTypeUI(types) {
       else selectedTypes.delete(ty);
       applyFilters();
     });
+
     typeCheckboxes.set(ty, cb);
   }
+
+  viewer.scene.requestRender();
 }
 
 async function main() {
-  // Load GeoJSON (Cesium supports GeoJsonDataSource.load)
-  dataSource = await Cesium.GeoJsonDataSource.load("./events.geojson", {
+  // Cache-bust during development (optional). Comment out once stable.
+  // const url = "./events.geojson?v=" + Date.now();
+  const url = "./events.geojson";
+
+  // Load GeoJSON
+  dataSource = await Cesium.GeoJsonDataSource.load(url, {
     clampToGround: true,
   });
   viewer.dataSources.add(dataSource);
+
+  // Clustering helps a LOT when zoomed out (less visual clutter + less work)
+  dataSource.clustering.enabled = true;
+  dataSource.clustering.pixelRange = 40;
+  dataSource.clustering.minimumClusterSize = 6;
 
   allEntities = dataSource.entities.values;
 
@@ -109,32 +155,42 @@ async function main() {
     if (ty) typesSet.add(ty);
   }
 
-  availableDates = Array.from(datesSet).sort((a,b) => a - b);
-  const types = Array.from(typesSet).sort((a,b) => a.localeCompare(b));
+  availableDates = Array.from(datesSet).sort((a, b) => a - b);
+  const types = Array.from(typesSet).sort((a, b) => a.localeCompare(b));
 
   if (availableDates.length < 2) {
     console.warn("Not enough distinct dates for range filter. Add event_date_ms to GeoJSON.");
+    // Still render something if present
+    viewer.scene.requestRender();
     return;
   }
 
   // Slider setup (indexes into availableDates)
-  const from = document.getElementById("fromRange");
-  const to = document.getElementById("toRange");
+  fromRangeEl.min = 0;
+  fromRangeEl.max = availableDates.length - 1;
+  fromRangeEl.value = 0;
 
-  from.min = 0; from.max = availableDates.length - 1; from.value = 0;
-  to.min = 0;   to.max = availableDates.length - 1;   to.value = availableDates.length - 1;
+  toRangeEl.min = 0;
+  toRangeEl.max = availableDates.length - 1;
+  toRangeEl.value = availableDates.length - 1;
 
-  from.addEventListener("input", () => {
-    if (Number(from.value) > Number(to.value)) from.value = to.value;
+  fromRangeEl.addEventListener("input", () => {
+    if (Number(fromRangeEl.value) > Number(toRangeEl.value)) fromRangeEl.value = toRangeEl.value;
     applyFilters();
   });
-  to.addEventListener("input", () => {
-    if (Number(to.value) < Number(from.value)) to.value = from.value;
+
+  toRangeEl.addEventListener("input", () => {
+    if (Number(toRangeEl.value) < Number(fromRangeEl.value)) toRangeEl.value = fromRangeEl.value;
     applyFilters();
   });
 
   buildTypeUI(types);
   applyFilters();
+
+  // Optional: zoom to your data once it loads (nice UX + ensures you see points)
+  // viewer.flyTo(dataSource);
+
+  viewer.scene.requestRender();
 }
 
 main().catch(console.error);
