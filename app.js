@@ -69,7 +69,7 @@ function buildTypeUI(types) {
 
 async function main() {
   // Load GeoJSON (Cesium supports GeoJsonDataSource.load)
-  dataSource = await Cesium.GeoJsonDataSource.load("./data/events.geojson", {
+  dataSource = await Cesium.GeoJsonDataSource.load("./events.geojson", {
     clampToGround: true,
   });
   viewer.dataSources.add(dataSource);
