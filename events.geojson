@@ -1,18 +1,10 @@
 {
-  "type": "FeatureCollection",
-  "features": [
-    {
-      "type": "Feature",
-      "properties": {
-        "event_type": "Protests",
-        "event_date": "2025-12-18",
-        "event_date_ms": 1766016000000,
-        "fatalities": 0,
-        "actor1": "Civilians",
-        "actor2": "",
-        "notes": "Example event notes"
-      },
-      "geometry": { "type": "Point", "coordinates": [-1.52, 12.37] }
-    }
-  ]
+  "type": "Feature",
+  "properties": {
+    "event_type": "Protests",
+    "event_date": "2025-12-18",
+    "event_date_ms": 1766016000000,
+    "notes": "..."
+  },
+  "geometry": { "type": "Point", "coordinates": [-1.52, 12.37] }
 }
